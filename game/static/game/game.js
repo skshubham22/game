@@ -43,7 +43,8 @@ function connect() {
             alert("This room code has expired (valid for 5 mins). Please create a new room.");
             window.location.href = '/';
         } else {
-            document.getElementById('connection-status').innerText = 'Disconnected - Refresh Page';
+            console.error('Socket closed', e);
+            document.getElementById('connection-status').innerText = `Disconnected (Code: ${e.code})`;
             document.getElementById('connection-status').style.color = '#ff7675';
         }
     };
