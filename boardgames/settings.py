@@ -81,6 +81,13 @@ ASGI_APPLICATION = 'boardgames.asgi.application'
 
 CHANNEL_LAYERS = {
     "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')],
+        },
+    }
+} if 'REDIS_URL' in os.environ else {
+    "default": {
         "BACKEND": "channels.layers.InMemoryChannelLayer"
     }
 }

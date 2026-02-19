@@ -3,3 +3,4 @@ channels
 daphne
 whitenoise
 uvicorn
+channels_redis
