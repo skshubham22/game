@@ -10,6 +10,8 @@ class Room(models.Model):
     
     code = models.CharField(max_length=8, unique=True, blank=True)
     game_type = models.CharField(max_length=20, choices=GAME_TYPES, default='TIC_TAC_TOE')
+    mode = models.CharField(max_length=20, default='ONLINE') # ONLINE, COMPUTER, LOCAL
+    player_count = models.IntegerField(default=2) # 2, 3, 4
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
     
@@ -30,12 +32,15 @@ class Room(models.Model):
                     'players': {} 
                 }
             elif self.game_type == 'LUDO':
+                # Positions: -1 = Base, 0-51 = Main Path, 52-56 = Home Stretch, 57 = Home
                 self.game_state = {
-                    'players': {}, # session: {color: 'RED', pieces: [0,0,0,0], ...}
+                    'players': {}, # session_key: {color: 'RED', pieces: [-1, -1, -1, -1], score: 0, name: ''}
                     'turn': 'RED', # RED, GREEN, YELLOW, BLUE
                     'dice_value': 0,
+                    'phase': 'ROLL', # ROLL or MOVE
                     'winner': None,
-                    'board': {} # track piece positions if needed, or just calculate from pieces
+                    'consecutive_sixes': 0,
+                    'last_moved_piece': None
                 }
         
         super().save(*args, **kwargs)

@@ -24,7 +24,13 @@ def index(request):
                 
         elif action == 'create':
             game_type = request.POST.get('game_type', 'TIC_TAC_TOE')
-            room = Room.objects.create(game_type=game_type)
+            mode = request.POST.get('mode', 'ONLINE')
+            try:
+                player_count = int(request.POST.get('player_count', 2))
+            except ValueError:
+                player_count = 2
+                
+            room = Room.objects.create(game_type=game_type, mode=mode, player_count=player_count)
             return redirect('room', room_code=room.code)
             
     return render(request, 'game/index.html')

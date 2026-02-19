@@ -64,6 +64,10 @@ class GameConsumer(AsyncWebsocketConsumer):
                 await self.roll_dice(text_data_json)
             elif message_type == 'reset_game':
                 await self.reset_game(text_data_json)
+            elif message_type == 'chat_message':
+                await self.chat_message(text_data_json)
+            elif message_type == 'search_stickers':
+                await self.search_stickers(text_data_json)
         except Exception as e:
             print(f"DEBUG: Error in receive: {e}")
             import traceback
@@ -80,6 +84,9 @@ class GameConsumer(AsyncWebsocketConsumer):
             self.room_group_name,
             {'type': 'game_update', 'game_state': await self.get_game_state()}
         )
+        
+        # Check if it's bot turn
+        await self.trigger_bot_if_needed()
 
     async def make_move(self, data):
         index = data.get('index')
@@ -89,6 +96,9 @@ class GameConsumer(AsyncWebsocketConsumer):
                 self.room_group_name,
                 {'type': 'game_update', 'game_state': await self.get_game_state()}
             )
+            
+            # Check for bot
+            await self.trigger_bot_if_needed()
 
     async def roll_dice(self, data):
         player = data.get('player')
@@ -101,6 +111,18 @@ class GameConsumer(AsyncWebsocketConsumer):
                 self.room_group_name,
                 {'type': 'game_update', 'game_state': await self.get_game_state()}
             )
+            
+            # Check for Auto-Pass
+            state = await self.get_game_state()
+            if state.get('phase') == 'AUTO_PASS':
+                import asyncio
+                asyncio.create_task(self.delayed_pass(self.room_code))
+            else:
+                 # If user rolled 6, they might get another turn, but it's still their turn.
+                 # If somehow turn changed (not possible in roll unless auto-pass), check bot.
+                 if state['turn'] != player:
+                     await self.trigger_bot_if_needed()
+
 
     async def reset_game(self, data):
         if await self.reset_game_state():
@@ -113,6 +135,119 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'game_update',
             'game_state': event['game_state']
+        }))
+
+    async def chat_message(self, data):
+        message = data.get('message')
+        sender = data.get('sender', 'Anonymous')
+        
+        # Broadcast to room
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'chat_broadcast',
+                'message': message,
+                'sender': sender
+            }
+        )
+
+        # AI Agent Trigger
+        if message and message.lower().startswith('@ai'):
+             import asyncio
+             asyncio.create_task(self.handle_ai_command(message))
+
+    async def chat_broadcast(self, event):
+        # Send message to WebSocket
+        await self.send(text_data=json.dumps({
+            'type': 'chat_message',
+            'message': event['message'],
+            'sender': event['sender']
+        }))
+
+    async def handle_ai_command(self, message):
+        import urllib.request
+        import random
+        
+        cmd = message.lower().strip()
+        response_msg = ""
+        sender_name = "LudoBot 🤖"
+        
+        try:
+            if "meme" in cmd:
+                # Fetch meme
+                url = "https://meme-api.com/gimme"
+                with urllib.request.urlopen(url) as response:
+                    data = json.loads(response.read().decode())
+                    response_msg = data.get('url', 'Could not fetch meme :(')
+            
+            elif "sticker" in cmd or "cat" in cmd:
+                # Fetch cat sticker (using cataas or similar)
+                # Cataas sometimes is slow, tried robohash?
+                # Let's use robohash for "Sticker" if keyword is generic, or cataas if cat.
+                if "cat" in cmd:
+                     # cataas json
+                     # url = "https://cataas.com/cat?json=true"
+                     # simplified: just use the image url pattern with a random cachebuster
+                     response_msg = f"https://cataas.com/cat?t={random.randint(1,1000)}"
+                else:
+                    # Generic sticker from robohash
+                    seed = random.randint(1, 1000)
+                    response_msg = f"https://robohash.org/{seed}.png?set=set2&size=200x200"
+            
+            else:
+                response_msg = "I can send you a 'meme' or a 'sticker' (try '@ai meme' or '@ai sticker')"
+            
+            # Send AI Response
+            if response_msg:
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'chat_broadcast',
+                        'message': response_msg,
+                        'sender': sender_name
+                    }
+                )
+        except Exception as e:
+            print(f"AI Error: {e}")
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    'type': 'chat_broadcast',
+                    'message': "My brain is offline 😵",
+                    'sender': sender_name
+                }
+            )
+
+
+
+    async def search_stickers(self, data):
+        query = data.get('query', '').lower().strip()
+        results = []
+        
+        # 1. Add some static/generative matches
+        import random
+        
+        # Robohash (Monster/Robot/Head)
+        results.append(f"https://robohash.org/{query}.png?set=set2&size=150x150")
+        results.append(f"https://robohash.org/{query}.png?set=set1&size=150x150")
+        
+        # LoremFlickr (Real Images) - use random lock to get different images
+        # Note: LoremFlickr might be slow, but it's free.
+        # Add timestamp to bypass cache
+        results.append(f"https://loremflickr.com/150/150/{query}?lock={random.randint(1,1000)}")
+        results.append(f"https://loremflickr.com/150/150/{query}?lock={random.randint(1,1000)}")
+        
+        # Send results back to requester ONLY (not broadcast)
+        # But for simplicity, we can send to group? No, requester is better.
+        # Self send.
+        await self.send(text_data=json.dumps({
+            'type': 'sticker_search_results',
+            'results': results
+        }))
+        await self.send(text_data=json.dumps({
+            'type': 'chat_message',
+            'message': event['message'],
+            'sender': event['sender']
         }))
 
     @database_sync_to_async
@@ -139,15 +274,84 @@ class GameConsumer(AsyncWebsocketConsumer):
             if 'X' not in [p['side'] for p in players.values()]: side = 'X'
             elif 'O' not in [p['side'] for p in players.values()]: side = 'O'
             else: side = 'SPECTATOR'
-        elif room.game_type == 'LUDO':
-            colors = ['RED', 'GREEN', 'YELLOW', 'BLUE']
+        if room.game_type == 'LUDO':
+            # 8-Player Support
+            base_colors = ['RED', 'GREEN', 'YELLOW', 'BLUE', 'ORANGE', 'PURPLE', 'CYAN', 'PINK']
+            # Limit based on room capacity?
+            # Assuming room.player_count is set correctly.
+            colors = base_colors[:room.player_count] if room.player_count > 4 else base_colors[:4]
+            
+            # Mode Logic
+            if room.mode == 'COMPUTER':
+                # User gets first available (usually Red)
+                # Bots get the rest based on player_count
+                
+                # Check if user already has a side
+                if player_id in players:
+                    return players[player_id]['side']
+                    
+                # Assign side to user
+                taken = [p['side'] for p in players.values()]
+                available = [c for c in colors if c not in taken]
+                
+                # If room is empty, reset and setup bots
+                if not players:
+                    side = 'RED'
+                    players[player_id] = {
+                        'side': side, 'name': player_name, 
+                        'pieces': [-1, -1, -1, -1], 'finished_pieces': 0, 'is_bot': False
+                    }
+                    
+                    # Add Bots
+                    count = room.player_count
+                    bot_colors = colors[1:count] # Green, Yellow, Blue
+                    for b_color in bot_colors:
+                         players[f'bot_{b_color}'] = {
+                            'side': b_color, 'name': 'Computer', 
+                            'pieces': [-1, -1, -1, -1], 'finished_pieces': 0, 'is_bot': True
+                        }
+                    room.game_state = state
+                    room.save()
+                    return side
+                else:
+                    # Rejoining user?
+                    return 'SPECTATOR' 
+
+            elif room.mode == 'LOCAL':
+                # Single session controls all players? 
+                # Or pass and play means we just need to assign colors to the *Session* but allow moves from that session for ANY color?
+                # Actually, standard Django Channels prevents this unless we map multiple sides to one session.
+                # Simplified Local Mode:
+                # User is 'RED' effectively, but `make_move` allows moving ANY piece if it's their turn.
+                
+                if not players:
+                     # Initialize all needed players
+                     count = room.player_count
+                     active_colors = colors[:count]
+                     for c in active_colors:
+                         players[f'local_{c}'] = {
+                            'side': c, 'name': f'Player {c}', 
+                            'pieces': [-1, -1, -1, -1], 'finished_pieces': 0, 'is_bot': False, 'is_local': True
+                        }
+                     players[player_id] = {'side': 'CONTROLLER', 'name': player_name} # Admin
+                
+                room.save()
+                return 'CONTROLLER'
+
+            # ONLINE (Default)
             taken = [p['side'] for p in players.values()]
             available = [c for c in colors if c not in taken]
             side = available[0] if available else 'SPECTATOR'
-        else:
-            side = 'SPECTATOR'
-
-        players[player_id] = {'side': side, 'name': player_name, 'score': 0}
+            players[player_id] = {
+                'side': side, 
+                'name': player_name, 
+                'pieces': [-1, -1, -1, -1],
+                'finished_pieces': 0,
+                'is_bot': False
+            }
+        else: # TIC_TAC_TOE
+             players[player_id] = {'side': side, 'name': player_name, 'score': 0}
+        
         room.save()
         return side
 
@@ -157,31 +361,142 @@ class GameConsumer(AsyncWebsocketConsumer):
         state = room.game_state
         
         if room.game_type == 'TIC_TAC_TOE':
-            if state.get('game_over', False) or state['board'][index] is not None or state['turn'] != player:
+            # ... (TicTacToe logic logic unchanged for now, but need to reconstruct if replaced fully)
+            # Re-implementing TicTacToe logic briefly as it was inside the block
+             if state.get('game_over', False) or state['board'][index] is not None or state['turn'] != player:
                 return False
-            
-            state['board'][index] = player
-            
-            # Check Winner
-            if self.check_winner(state['board'], player):
-                state['winner'] = player # Stores 'X' or 'O'
+             state['board'][index] = player
+             if self.check_winner(state['board'], player):
+                state['winner'] = player
                 state['game_over'] = True
-                # Update Score
-                winner_name = player
-                for pid, pdata in state['players'].items():
-                    if pdata['side'] == player:
-                        pdata['score'] = pdata.get('score', 0) + 1
-                        winner_name = pdata['name'] # Store name for display if needed
-                state['winner_name'] = winner_name
-            elif None not in state['board']:
+             elif None not in state['board']:
                 state['winner'] = 'Draw'
                 state['game_over'] = True
-            else:
+             else:
                 state['turn'] = 'O' if player == 'X' else 'X'
+             room.save()
+             return True
+
+        elif room.game_type == 'LUDO':
+            if state['turn'] != player or state.get('phase') != 'MOVE':
+                return False
+            
+            piece_idx = index # 0-3
+            dice_val = state['dice_value']
+            
+            # Find player
+            p_key = None
+            p_data = None
+            for k, p in state['players'].items():
+                if p['side'] == player:
+                    p_key = k
+                    p_data = p
+                    break
+            
+            if not p_data: return False
+            
+            current_pos = p_data['pieces'][piece_idx]
+            
+            # Move Logic
+            new_pos = -1
+            
+            if current_pos == -1:
+                if dice_val == 6:
+                    # LIMIT ACTIVE PIECES TO 2 (RESTORED)
+                    active_count = sum(1 for p in p_data['pieces'] if p > -1 and p < 57)
+                    if active_count >= 2:
+                        return False # Cannot have more than 2 pieces out
+
+                    new_pos = 0 # Move to start
+                else:
+                    return False # Invalid move
+            elif current_pos == 57:
+                return False # Already finished
+            else:
+                if current_pos + dice_val > 57:
+                    return False # Cannot move
+                new_pos = current_pos + dice_val
                 
-            room.game_state = state
+            # Update Position
+            p_data['pieces'][piece_idx] = new_pos
+            
+            # Check Actions (Capture, Home)
+            if new_pos == 57:
+                p_data['finished_pieces'] = p_data.get('finished_pieces', 0) + 1
+                if p_data['finished_pieces'] == 4:
+                    state['winner'] = player
+            elif new_pos < 52: # Main board, check collision
+                 self.check_collision(state, player, new_pos)
+            
+            self.next_turn(state)
             room.save()
             return True
+            
+        return False
+
+    def check_collision(self, state, player_color, piece_pos):
+        # Determine Board Configuration
+        # If we have any of the extended colors, use 8-player logic
+        extended_colors = ['ORANGE', 'PURPLE', 'CYAN', 'PINK']
+        is_8_player = any(p['side'] in extended_colors for p in state['players'].values()) or len(state['players']) > 4
+        
+        if is_8_player:
+            total_steps = 104
+            segment_size = 13
+            # Order: RED, GREEN, YELLOW, BLUE, ORANGE, PURPLE, CYAN, PINK
+            # Wait, turn order in 'next_turn' must match offset order.
+            # Let's define a strict order for calculations
+            order = ['RED', 'GREEN', 'YELLOW', 'BLUE', 'ORANGE', 'PURPLE', 'CYAN', 'PINK']
+            offsets = {c: i * segment_size for i, c in enumerate(order)}
+            
+            # Safe spots (Standard Ludo: Start + Star) -> index 0 and 8 relative to start
+            # Global Safe Indices
+            safe_indices = []
+            for i in range(8):
+                base = i * segment_size
+                safe_indices.append(base) # Start
+                safe_indices.append((base + 8) % total_steps) # Star
+                
+        else:
+            total_steps = 52
+            segment_size = 13
+            order = ['RED', 'GREEN', 'YELLOW', 'BLUE']
+            offsets = {c: i * segment_size for i, c in enumerate(order)}
+            safe_indices = [0, 8, 13, 21, 26, 34, 39, 47]
+
+        # offsets = {'RED': 0, 'GREEN': 13, 'YELLOW': 26, 'BLUE': 39}
+        if player_color not in offsets: return # Should not happen
+        
+        global_pos = (piece_pos + offsets[player_color]) % total_steps
+        
+        # Check if safe square
+        if global_pos in safe_indices:
+            return
+            
+        # Check other players
+        for p in state['players'].values():
+            if p['side'] == player_color: continue
+            if p['side'] not in offsets: continue # Paranoia
+            
+            for i, other_pos in enumerate(p['pieces']):
+                if 0 <= other_pos < total_steps:
+                    other_global = (other_pos + offsets[p['side']]) % total_steps
+                    if other_global == global_pos:
+                        # CAPTURE!
+                        p['pieces'][i] = -1 # Send to base
+                        # Initial player gets another turn? (Standard rules say yes, but keeping simple for now)
+                        # To implement "Capture Bonus Turn", we'd need to modify next_turn logic.
+                        # For now, let's just capture.
+
+    def check_winner(self, board, player):
+        wins = [
+            [0, 1, 2], [3, 4, 5], [6, 7, 8], # Rows
+            [0, 3, 6], [1, 4, 7], [2, 5, 8], # Cols
+            [0, 4, 8], [2, 4, 6]             # Diagonals
+        ]
+        for combo in wins:
+            if all(board[i] == player for i in combo):
+                return True
         return False
 
     @database_sync_to_async
@@ -189,20 +504,242 @@ class GameConsumer(AsyncWebsocketConsumer):
         room = Room.objects.get(code=self.room_code)
         state = room.game_state
         if room.game_type == 'LUDO':
-            if state['turn'] != player:
+            if state['turn'] != player or state.get('phase', 'ROLL') != 'ROLL':
                 return False
+            
             state['dice_value'] = value
-            # Simple turn switching for now (real rules usually wait for move)
-            # For this step, let's just rotate turn to show interactivity
-            colors = ['RED', 'GREEN', 'YELLOW', 'BLUE']
-            try:
-                current_idx = colors.index(player)
-                next_idx = (current_idx + 1) % 4
-                state['turn'] = colors[next_idx]
-            except ValueError:
-                pass
+            state['phase'] = 'MOVE'
+            
+            # Auto-pass if no moves possible
+            # Auto-pass if no moves possible
+            if not self.has_valid_moves(state, player, value):
+                 # Set phase to 'AUTO_PASS'
+                 state['phase'] = 'AUTO_PASS' 
+                 # We DO NOT spawn task here. We rely on the caller (roll_dice) to check state and spawn task.
+                 # purely sync DB update here.
+            
             room.save()
             return True
+        return False
+        
+        return False
+        
+    async def delayed_pass(self, room_code):
+        import asyncio
+        await asyncio.sleep(2)
+        try:
+            room = await database_sync_to_async(Room.objects.get)(code=room_code)
+            state = room.game_state
+            if state.get('phase') == 'AUTO_PASS':
+                # Re-check valid moves? No, just pass.
+                
+                # Check consecutive sixes reset happens in next_turn
+                self.next_turn(state)
+                await database_sync_to_async(room.save)()
+                
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {'type': 'game_update', 'game_state': state}
+                )
+                
+                # Trigger bot loop
+                await self.trigger_bot_if_needed()
+                
+                # Also save again if check_bot_turn modified something (it doesn't directly, it launches task)
+                return True
+        except Exception as e:
+            print(f"Error in delayed_pass: {e}")
+        return False
+        
+    def has_valid_moves(self, state, player, dice_val):
+        # Find player data
+        p_data = None
+        for p in state['players'].values():
+            if p['side'] == player:
+                p_data = p
+                break
+        if not p_data: return False
+        
+        pieces = p_data['pieces']
+        for p_idx, pos in enumerate(pieces):
+            if pos == -1:
+                if dice_val == 6: return True # Can leave base
+            elif pos == 57:
+                continue # Already home
+            else:
+                if pos + dice_val <= 57: return True
+        return False
+
+    def next_turn(self, state):
+        base_colors = ['RED', 'GREEN', 'YELLOW', 'BLUE', 'ORANGE', 'PURPLE', 'CYAN', 'PINK']
+        is_8_player = any(p['side'] in base_colors[4:] for p in state['players'].values()) or len(state['players']) > 4
+        colors = base_colors if is_8_player else base_colors[:4]
+        
+
+        # Check if current player gets another turn (rolled 6)
+        # But maybe limit to 3 times? (Not implemented for simplicity yet, unless requested)
+        if state['dice_value'] == 6 and state.get('consecutive_sixes', 0) < 2 and state['winner'] is None:
+             state['phase'] = 'ROLL'
+             state['consecutive_sixes'] = state.get('consecutive_sixes', 0) + 1
+             # Bot trigger is handled by caller checking state
+             return
+
+        # Next player
+        state['consecutive_sixes'] = 0
+
+        active_sides = [p['side'] for p in state['players'].values() if p['side'] in colors]
+        # Sort by standard order
+        active_sides.sort(key=lambda x: colors.index(x))
+
+        if not active_sides:
+            state['turn'] = 'RED' # Fallback
+            return
+
+        try:
+            current_side = state['turn']
+            if current_side in active_sides:
+                idx = active_sides.index(current_side)
+                next_side = active_sides[(idx + 1) % len(active_sides)]
+            else:
+                 # Current turn holder maybe left or invalid? Start from first active.
+                 next_side = active_sides[0]
+
+            state['turn'] = next_side
+            state['phase'] = 'ROLL'
+            state['dice_value'] = 0
+
+            # Bot trigger handled by caller
+
+
+        except Exception as e:
+            print(f"Error in next_turn: {e}")
+            state['turn'] = active_sides[0]
+            state['phase'] = 'ROLL'
+
+    async def trigger_bot_if_needed(self):
+        state = await self.get_game_state()
+        # Find player for turn
+        for p in state['players'].values():
+            if p['side'] == state['turn'] and p.get('is_bot'):
+                # Trigger Bot
+                import asyncio
+                asyncio.create_task(self.run_bot_turn(state['turn']))
+                break
+
+    async def run_bot_turn(self, bot_color):
+        import asyncio
+        await asyncio.sleep(1) # Thinking time
+
+        # Roll Dice
+        import random
+        dice_value = random.randint(1, 6)
+
+        # We need to fetch FRESH state because async sleep released lock conceptually (though here we don't have lock)
+        # But we need to save to DB.
+
+        room = await database_sync_to_async(Room.objects.get)(code=self.room_code)
+        state = room.game_state
+
+        if state['turn'] != bot_color: return # State changed?
+
+        # UPDATE STATE WITH ROLL
+        state['dice_value'] = dice_value
+        state['phase'] = 'MOVE'
+        room.game_state = state
+        await database_sync_to_async(room.save)()
+
+        # Notify Frontend
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {'type': 'game_update', 'game_state': state}
+        )
+
+        await asyncio.sleep(1) # Animation time
+
+        # DECIDE MOVE
+        moves = [] # (piece_idx, score)
+
+        p_data = None
+        for p in state['players'].values():
+            if p['side'] == bot_color:
+                p_data = p
+                break
+
+        if not p_data: return
+
+        pieces = p_data['pieces']
+        for idx, pos in enumerate(pieces):
+             if pos == -1:
+                 if dice_value == 6:
+                     moves.append((idx, 100)) # High priority to leave base
+             elif pos == 57:
+                 continue
+             elif pos + dice_value <= 57:
+                 # Calculate Score
+                 score = 10 # Base move score
+                 new_pos = pos + dice_value
+                 if new_pos == 57: score += 500 # WIN piece
+
+                 # Capture logic (simplified check)
+                 # We need full collision check logic here, duplication is bad but fast for now.
+                 if self.is_capture(state, bot_color, new_pos):
+                     score += 200
+
+                 # Safe spot
+                 offsets = {'RED': 0, 'GREEN': 13, 'YELLOW': 26, 'BLUE': 39}
+                 global_pos = (new_pos + offsets[bot_color]) % 52
+                 if global_pos in [0, 8, 13, 21, 26, 34, 39, 47]:
+                     score += 50
+
+                 moves.append((idx, score))
+
+        # EXECUTE MOVE
+        if moves:
+            # Pick best
+            moves.sort(key=lambda x: x[1], reverse=True)
+            best_idx = moves[0][0]
+            await self.update_game_state(best_idx, bot_color)
+
+            # Send Update
+            # Get fresh state again? update_game_state saves it.
+            room = await database_sync_to_async(Room.objects.get)(code=self.room_code)
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {'type': 'game_update', 'game_state': room.game_state}
+            )
+            
+            # Chain Next Bot
+            await self.trigger_bot_if_needed()
+        else:
+            # No moves
+            await asyncio.sleep(1)
+            
+            # Reread fresh state
+            room = await database_sync_to_async(Room.objects.get)(code=self.room_code)
+            self.next_turn(room.game_state)
+            await database_sync_to_async(room.save)()
+
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {'type': 'game_update', 'game_state': room.game_state}
+            )
+            
+            # Chain Next Bot
+            await self.trigger_bot_if_needed()
+
+    def is_capture(self, state, player_color, piece_pos):
+        if piece_pos > 51: return False # Home stretch safe
+        offsets = {'RED': 0, 'GREEN': 13, 'YELLOW': 26, 'BLUE': 39}
+        global_pos = (piece_pos + offsets[player_color]) % 52
+        if global_pos in [0, 8, 13, 21, 26, 34, 39, 47]: return False
+
+        for p in state['players'].values():
+            if p['side'] == player_color: continue
+            for other_pos in p['pieces']:
+                if 0 <= other_pos < 52:
+                    other_global = (other_pos + offsets[p['side']]) % 52
+                    if other_global == global_pos:
+                        return True
         return False
 
     @database_sync_to_async

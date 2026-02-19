@@ -24,16 +24,103 @@
         <div class="actions">
             <h3 style="margin-bottom: 0.5rem; color: var(--secondary);">Choose Game</h3>
             <div class="game-selection">
-                <button type="submit" name="game_type" value="TIC_TAC_TOE" class="game-card"
-                    onclick="setAction('create')">
+                <button type="button" class="game-card" onclick="selectGame('TIC_TAC_TOE')">
                     <div class="icon">❌⭕</div>
                     <span>Tic Tac Toe</span>
                 </button>
-                <button type="submit" name="game_type" value="LUDO" class="game-card" onclick="setAction('create')">
+                <button type="button" class="game-card" onclick="selectGame('LUDO')">
                     <div class="icon">🎲</div>
                     <span>Ludo</span>
                 </button>
+                <input type="hidden" name="game_type" id="game-type-input" value="LUDO">
             </div>
+
+            <div id="ludo-options" style="display: none; margin-bottom: 2rem;">
+                <h4 style="color: var(--text-dim); margin-bottom: 1rem;">Game Mode</h4>
+                <div class="mode-selection">
+                    <label class="mode-option">
+                        <input type="radio" name="mode" value="ONLINE" checked>
+                        <span>Online</span>
+                    </label>
+                    <label class="mode-option">
+                        <input type="radio" name="mode" value="COMPUTER">
+                        <span>Vs Computer</span>
+                    </label>
+                    <label class="mode-option">
+                        <input type="radio" name="mode" value="LOCAL">
+                        <span>Local (Pass & Play)</span>
+                    </label>
+                </div>
+
+                <h4 style="color: var(--text-dim); margin-bottom: 1rem; margin-top: 1.5rem;">Players</h4>
+                <div class="player-count-selection">
+                    <label class="count-option">
+                        <input type="radio" name="player_count" value="2" checked>
+                        <span>2 Players</span>
+                    </label>
+                    <label class="count-option">
+                        <input type="radio" name="player_count" value="3">
+                        <span>3 Players</span>
+                    </label>
+                    <label class="count-option">
+                        <input type="radio" name="player_count" value="4">
+                        <span>4 Players</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="actions-buttons" style="margin-top: 2rem;">
+                <button type="submit" name="action" value="create" class="btn btn-primary"
+                    onclick="setAction('create')">Create Game</button>
+            </div>
+
+            <script>
+                function selectGame(type) {
+                    document.getElementById('game-type-input').value = type;
+                    // Update UI to show selected (add active class logc if needed)
+                    // Show options if Ludo
+                    if (type === 'LUDO') {
+                        document.getElementById('ludo-options').style.display = 'block';
+                    } else {
+                        document.getElementById('ludo-options').style.display = 'none';
+                    }
+                }
+                // Default
+                selectGame('LUDO');
+            </script>
+
+            <style>
+                .mode-selection,
+                .player-count-selection {
+                    display: flex;
+                    justify-content: center;
+                    gap: 10px;
+                }
+
+                .mode-option input,
+                .count-option input {
+                    display: none;
+                }
+
+                .mode-option span,
+                .count-option span {
+                    display: inline-block;
+                    padding: 8px 15px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 20px;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                }
+
+                .mode-option input:checked+span,
+                .count-option input:checked+span {
+                    background: var(--primary);
+                    color: var(--bg);
+                    border-color: var(--primary);
+                    box-shadow: 0 0 15px var(--primary-dim);
+                }
+            </style>
 
             <div class="input-group"
                 style="margin-top: 2rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
@@ -48,6 +135,34 @@
         <script>
             function setAction(action) {
                 document.getElementById('form-action').value = action;
+            }
+
+            function selectGame(type) {
+                document.getElementById('game-type-input').value = type;
+
+                // Update UI
+                const cards = document.querySelectorAll('.game-card');
+                cards.forEach(c => c.style.borderColor = 'rgba(255,255,255,0.1)');
+
+                // Highlight selected (simple find by checking onclick attribute or just add IDs? 
+                // Let's just highlight the clicked one if we had event, but we passed type.
+                // Re-select by onclick attribute content)
+                cards.forEach(c => {
+                    if (c.getAttribute('onclick').includes(type)) {
+                        c.style.borderColor = '#6c5ce7';
+                        c.style.backgroundColor = 'rgba(108, 92, 231, 0.2)';
+                    } else {
+                        c.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                    }
+                });
+
+                // Show/Hide Options
+                const ludoOpts = document.getElementById('ludo-options');
+                if (type === 'LUDO') {
+                    ludoOpts.style.display = 'block';
+                } else {
+                    ludoOpts.style.display = 'none';
+                }
             }
         </script>
 
