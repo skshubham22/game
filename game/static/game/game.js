@@ -40,15 +40,19 @@ const BASE_POSITIONS = {
     'BLUE': [[11, 2], [11, 3], [12, 2], [12, 3]]
 };
 
+let reconnectInterval = 2000;
+
 function connect() {
     const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
     const host = window.location.host;
-    socket = new WebSocket(
-        `${wsScheme}://${host}/ws/game/${roomCode}/`
-    );
+    const wsUrl = `${wsScheme}://${host}/ws/game/${roomCode}/`;
+
+    console.log(`Connecting to: ${wsUrl}`);
+    socket = new WebSocket(wsUrl);
 
     socket.onopen = function (e) {
         console.log('Chat socket opened');
+        reconnectInterval = 2000; // Reset reconnect interval on success
         const status = document.getElementById('connection-status');
         if (status) {
             status.innerText = 'Connected';
@@ -71,22 +75,39 @@ function connect() {
             renderBoard(data.game_state);
         } else if (data.type === 'chat_message') {
             displayChatMessage(data.message, data.sender);
+        } else if (data.type === 'error') {
+            showToast(data.message);
         }
     };
 
     socket.onclose = function (e) {
         const status = document.getElementById('connection-status');
         if (e.code === 4000) {
-            if (status) status.innerText = 'Room Expired!';
+            console.log('Room Expired');
+            if (status) {
+                status.innerText = 'Room Expired!';
+                status.style.color = '#ff7675';
+            }
             alert("This room code has expired. Please create a new room.");
             window.location.href = '/';
         } else {
-            console.error('Socket closed', e);
+            console.error('Socket closed unexpectedly', e);
             if (status) {
-                status.innerText = 'Disconnected';
+                status.innerText = 'Disconnected. Reconnecting...';
                 status.style.color = '#ff7675';
             }
+            // Reconnect logic
+            setTimeout(function () {
+                console.log("Attempting to reconnect...");
+                connect();
+            }, reconnectInterval);
+            reconnectInterval = Math.min(reconnectInterval * 1.5, 30000); // Exponential backoff
         }
+    };
+
+    socket.onerror = function (err) {
+        console.error('Socket encountered error: ', err.message, 'Closing socket');
+        socket.close();
     };
 }
 
@@ -498,12 +519,17 @@ function rollDice() {
 }
 
 function makeMove(index) {
-    console.log("Making move:", index);
-    socket.send(JSON.stringify({
-        'type': 'make_move',
-        'index': index,
-        'player': mySide
-    }));
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        console.log("Making move:", index);
+        socket.send(JSON.stringify({
+            'type': 'make_move',
+            'index': index,
+            'player': mySide
+        }));
+    } else {
+        console.warn("Cannot make move: WebSocket is not open.");
+        showToast("Connection lost. Trying to reconnect...");
+    }
 }
 
 function renderPlayers(players, currentTurn, diceVal) {
@@ -832,15 +858,7 @@ function handleChatKey(e) {
     if (e.key === 'Enter') sendChat();
 }
 
-function makeMove(index) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            'type': 'make_move',
-            'index': index,
-            'player': mySide
-        }));
-    }
-}
+// function makeMove(index) { ... moved/consolidated ... }
 
 function sendChat() {
     const input = document.getElementById('chat-input');
@@ -853,9 +871,10 @@ function sendChat() {
             'message': msg,
             'sender': mySide || 'Player'
         }));
+        input.value = ''; // Only clear if sent
+    } else {
+        showToast("Cannot send: Disconnected.");
     }
-
-    input.value = '';
 }
 
 function sendReaction(emoji) {

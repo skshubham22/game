@@ -282,27 +282,37 @@ class GameConsumer(AsyncWebsocketConsumer):
                 taken = [p['side'] for p in players.values()]
                 available = [c for c in colors if c not in taken]
                 
-                # If room is empty, reset and setup bots
-                if not players:
+                # If room is empty or only bots exist, let user join as RED
+                is_user_active = any(not p.get('is_bot') for p in players.values())
+                
+                if not is_user_active:
                     side = 'RED'
+                    # Remove any old stale non-bot players if they were assigned RED
+                    to_remove = [k for k, p in players.items() if p['side'] == 'RED' and not p.get('is_bot')]
+                    for k in to_remove: del players[k]
+
                     players[player_id] = {
                         'side': side, 'name': player_name, 
                         'pieces': [-1, -1, -1, -1], 'finished_pieces': 0, 'is_bot': False
                     }
                     
-                    # Add Bots
+                    # Ensure Bots exist
                     count = room.player_count
-                    bot_colors = colors[1:count] # Green, Yellow, Blue
+                    bot_colors = colors[1:count] 
                     for b_color in bot_colors:
-                         players[f'bot_{b_color}'] = {
-                            'side': b_color, 'name': 'Computer', 
-                            'pieces': [-1, -1, -1, -1], 'finished_pieces': 0, 'is_bot': True
-                        }
+                        bot_key = f'bot_{b_color}'
+                        if bot_key not in players:
+                             players[bot_key] = {
+                                'side': b_color, 'name': 'Computer', 
+                                'pieces': [-1, -1, -1, -1], 'finished_pieces': 0, 'is_bot': True
+                            }
                     room.game_state = state
                     room.save()
                     return side
                 else:
-                    # Rejoining user?
+                    # User already active or rejoining? Check if this session is already in players.
+                    if player_id in players:
+                        return players[player_id]['side']
                     return 'SPECTATOR' 
 
             elif room.mode == 'LOCAL':
@@ -367,6 +377,10 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         elif room.game_type == 'LUDO':
             if state['turn'] != player or state.get('phase') != 'MOVE':
+                await self.send(text_data=json.dumps({
+                    'type': 'error',
+                    'message': 'Not your turn or wait for roll!'
+                }))
                 return False
             
             piece_idx = index # 0-3
@@ -390,14 +404,13 @@ class GameConsumer(AsyncWebsocketConsumer):
             
             if current_pos == -1:
                 if dice_val == 6:
-                    # LIMIT ACTIVE PIECES TO 2 (RESTORED)
-                    active_count = sum(1 for p in p_data['pieces'] if p > -1 and p < 57)
-                    if active_count >= 2:
-                        return False # Cannot have more than 2 pieces out
-
                     new_pos = 0 # Move to start
                 else:
-                    return False # Invalid move
+                    await self.send(text_data=json.dumps({
+                        'type': 'error',
+                        'message': 'Need a 6 to start!'
+                    }))
+                    return False 
             elif current_pos == 57:
                 return False # Already finished
             else:

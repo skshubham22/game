@@ -79,6 +79,10 @@ TEMPLATES = [
 WSGI_APPLICATION = 'boardgames.wsgi.application'
 ASGI_APPLICATION = 'boardgames.asgi.application'
 
+# Channel Layers for WebSocket Communication
+# In PRODUCTION (e.g., Render/Railway), you MUST use Redis for chat to work 
+# across different users/processes. If REDIS_URL is not set, it falls back
+# to InMemoryChannelLayer, which only works locally or in single-process mode.
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
