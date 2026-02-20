@@ -563,9 +563,10 @@ Using Grid positioning is safest!
 /* Shared Dice Container */
 #shared-dice {
     position: relative;
-    margin: 20px;
+    margin-top: 20px;
+    margin-bottom: 0px;
     /* Space around dice */
-    order: -1;
+    /* order: -1; removed */
     /* Position between Info (-2) and Board (0) */
 
     /* Reset absolute */
@@ -574,11 +575,11 @@ Using Grid positioning is safest!
     transform: none;
     z-index: 10;
 
-    width: fit-content;
+    width: 100%;
     height: auto;
     padding: 15px;
     /* Bigger padding */
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
     border-radius: 20px;
     border: 4px solid #ccc;
     /* Will be colored by JS */
