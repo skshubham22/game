@@ -5,9 +5,11 @@ from .models import Room
 
 class GameConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        print(f"DEBUG: Connecting to {self.scope['url_route']['kwargs']['room_code']}")
         self.room_code = self.scope['url_route']['kwargs']['room_code']
-        self.room_group_name = 'game_%s' % self.room_code
+        self.room_group_name = f'game_{self.room_code}'
+        
+        # Diagnostic Log
+        print(f"DEBUG: Connecting to room {self.room_code}. Channel Layer: {self.channel_layer}")
 
         try:
             # Check expiration
