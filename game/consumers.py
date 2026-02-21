@@ -332,7 +332,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             # ONLINE (Default)
             taken = [p['side'] for p in players.values()]
             available = [c for c in colors if c not in taken]
-            side = available[0] if available else 'SPECTATOR'
+            if available:
+                side = available[0]
                 players[player_id] = {
                     'side': side, 
                     'name': player_name, 
@@ -341,7 +342,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'is_bot': False
                 }
             else:
-                # Controller or Spectator should also have basic keys if needed to prevent crash
+                side = 'SPECTATOR'
                 players[player_id] = {
                     'side': side,
                     'name': player_name,
