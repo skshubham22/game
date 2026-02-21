@@ -261,6 +261,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         state = room.game_state
         if 'players' not in state:
             state['players'] = {}
+        if 'turn' not in state:
+            state['turn'] = 'RED'
+        if 'phase' not in state:
+            state['phase'] = 'ROLL'
+        if 'dice_value' not in state:
+            state['dice_value'] = 0
         players = state['players']
         
         player_id = self.scope['session'].session_key or self.channel_name
