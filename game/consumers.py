@@ -37,7 +37,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             )
 
             await self.accept()
-            print("DEBUG: Connection accepted")
+            print(f"DEBUG: Connection accepted for room {self.room_code}. Session: {self.scope.get('session', {}).get('player_name', 'No session name')}")
         except Exception as e:
             print(f"DEBUG: Error in connect: {e}")
             import traceback
@@ -77,14 +77,16 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     async def join_game(self, data):
         side = await self.assign_player_side()
+        state = await self.get_game_state()
         await self.send(text_data=json.dumps({
             'type': 'game_start',
             'side': side,
-            'game_state': await self.get_game_state()
+            'game_state': state
         }))
+        print(f"DEBUG: Sent game_start to {side}. State players: {list(state.get('players', {}).keys())}")
         await self.channel_layer.group_send(
             self.room_group_name,
-            {'type': 'game_update', 'game_state': await self.get_game_state()}
+            {'type': 'game_update', 'game_state': state}
         )
         
         # Check if it's bot turn
@@ -331,13 +333,22 @@ class GameConsumer(AsyncWebsocketConsumer):
             taken = [p['side'] for p in players.values()]
             available = [c for c in colors if c not in taken]
             side = available[0] if available else 'SPECTATOR'
-            players[player_id] = {
-                'side': side, 
-                'name': player_name, 
-                'pieces': [-1, -1, -1, -1],
-                'finished_pieces': 0,
-                'is_bot': False
-            }
+                players[player_id] = {
+                    'side': side, 
+                    'name': player_name, 
+                    'pieces': [-1, -1, -1, -1],
+                    'finished_pieces': 0,
+                    'is_bot': False
+                }
+            else:
+                # Controller or Spectator should also have basic keys if needed to prevent crash
+                players[player_id] = {
+                    'side': side,
+                    'name': player_name,
+                    'pieces': [],
+                    'finished_pieces': 0,
+                    'is_bot': False
+                }
         
         room.game_state = state
         room.save()

@@ -72,6 +72,7 @@ function connect() {
             console.log("My Side:", mySide);
             renderBoard(data.game_state);
         } else if (data.type === 'game_update') {
+            console.log("DEBUG: Game update received:", data.game_state);
             renderBoard(data.game_state);
         } else if (data.type === 'chat_message') {
             displayChatMessage(data.message, data.sender);
@@ -230,8 +231,8 @@ function renderLudo(gameState) {
             const color = p.side;
             if (color === 'SPECTATOR') return;
 
-            if (!p.pieces) {
-                console.error("DEBUG: Player pieces missing!", p);
+            if (!p.pieces || !Array.isArray(p.pieces)) {
+                console.warn(`DEBUG: Player ${p.side} pieces missing or invalid!`, p);
                 return;
             }
 
